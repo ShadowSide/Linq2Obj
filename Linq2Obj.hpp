@@ -4,6 +4,7 @@
 #include <type_traits>
 #include <utility>
 #include <functional>
+#include <vector>
 
 namespace l2o
 {
@@ -97,12 +98,78 @@ namespace l2o
 	private:
 		ForwardCollectionPointer _source;
 
-		/*ctor s*/
+		enumerable_forward_collection() = default;
+		enumerable_forward_collection(enumerable_forward_collection&&) = default;
+		enumerable_forward_collection(const enumerable_forward_collection&) = default;
+		enumerable_forward_collection& operator=(const enumerable_forward_collection&) = default;
+		enumerable_forward_collection& operator=(enumerable_forward_collection&&) = default;
 		
 	public:
 		enumerator<T> get_enumerator() const
 		{
+			if (_impl == nullptr)
+				throw empty_enumerable_exception();
+			using SourceType = value_type;
+			using ResultItem = SourceType;
+			struct emumerator_forward_collection : enumerator_base<ResultItem>
+			{
+				emumerator_forward_collection(ForwardCollectionPointer source)
+					: _source(source)
+					, _sourceCurrent(std::cbegin(_source))
+				{}
+				emumerator_forward_collection() = default;
+				emumerator_forward_collection(emumerator_forward_collection&&) = default;
+				emumerator_forward_collection(const emumerator_forward_collection&) = default;
+				emumerator_forward_collection& operator=(const emumerator_forward_collection&) = default;
+				emumerator_forward_collection& operator=(emumerator_forward_collection&&) = default;
 
+				ForwardCollectionPointer _source;
+				ForwardCollectionPointer _sourceCurrent;
+
+				ResultItem& get()
+				{
+					return *_sourceCurrent;
+				}
+
+				bool isCanGetNext()
+				{
+					auto isCanGetNext = _sourceCurrent != std::cend(_source);
+					if (isCanGetNext)
+						++_sourceCurrent;
+					return _sourceCurrent;
+				}
+			};
+			return enumerator<ResultItem>(std::make_shared<emumerator_forward_collection>(_impl));
+		}
+	};
+
+	template<class ResultItem, class SourceItem>
+	class enumerable_emumerator_converter: public enumerable_internal_base<ResultItem>
+	{
+	private:
+		//using ResultItem = T;
+		using InternalSource = std::shared_ptr<i_enumerable_internal<SourceItem>>;
+		InternalSource _source;
+		using InternalDestination = std::shared_ptr<i_enumerator<ResultItem>>;
+		typedef InternalDestination(InternalSource) EnumeratorConvertorSignature;
+		using EnumeratorConvertor = std::function<EnumeratorConvertorSignature>;
+		EnumeratorConvertor _converter;
+
+	public:
+		template<class InternalSource, class EnumeratorConvertor>
+		enumerable_emumerator_converter(InternalSource&& source; EnumeratorConvertor&& converter)
+			: _source(std::forward<InternalSource>(source))
+			, _converter(std::forward<Converter>(converter))
+		{}
+		enumerable_emumerator_converter() = delete;
+		enumerable_emumerator_converter(enumerable_emumerator_converter&&) = default;
+		enumerable_emumerator_converter(const enumerable_emumerator_converter&) = default;
+		enumerable_emumerator_converter& operator=(const enumerable_emumerator_converter&) = default;
+		enumerable_emumerator_converter& operator=(enumerable_emumerator_converter&&) = default;
+
+		enumerator<T> get_enumerator() const
+		{
+			return _converter(_source->get_enumerator());
 		}
 	};
 
@@ -214,21 +281,7 @@ namespace l2o
 
 		/*============================================================*/
 
-		/*template<class Functor>
-		auto select(Functor&& selector) -> enumerable<std::result_of_t<Functor (l2o::internal_::to_const_ref_t<T>)>>
-		{
-			using ResultItem = std::result_of_t<Functor(l2o::internal_::to_const_ref_t<T>)>;
-			return enumerable<ResultItem>(std::make_shared<enumerable_select<ResultItem>>(_impl, std::forward<Functor>(selector)));
-		}
-
-		template<class Predicate>
-		enumerable where(Predicate&& condition)
-		{
-			using ResultItem = T;
-			return enumerable<ResultItem>(std::make_shared<enumerable_where<ResultItem>>(_impl, std::forward<Predicate>(condition)));
-		}*/
-
-		template<class Selector>
+		/*template<class Selector>
 		enumerable order_by(Selector&& selector)
 		{
 			return order_by_comparator(ascending_comparator(std::forward<Selector>(selector)));
@@ -245,7 +298,7 @@ namespace l2o
 		{
 			using ResultItem = T;
 			return enumerable<ResultItem>(std::make_shared<enumerable_order_by_comparator<ResultItem>>(_impl, std::forward<Comparator>(comparator)));
-		}
+		}*/
 
 		//then_by
 
@@ -260,50 +313,53 @@ namespace l2o
 		template<class ResultItem, class EnumeratorConvertor>
 		enumerable<ResultItem> emumerator_converter(EnumeratorConvertor&& enumeratorConvertor)
 		{
-			return enumerable<ResultItem>(std::make_shared<enumerable_emumerator_converter<ResultItem>>(_impl, std::forward<EnumeratorConvertor>(enumeratorConvertor)));
+			using SourceType = value_type;
+			return enumerable<ResultItem>(std::make_shared<enumerable_emumerator_converter<ResultItem, SourceType>>(_impl, std::forward<EnumeratorConvertor>(enumeratorConvertor)));
 		}
 
 		template<class Functor>
 		auto select(Functor&& selector) -> enumerable<std::result_of_t<Functor(l2o::internal_::to_const_ref_t<T>)>>
 		{
+			using SourceItem = T;
 			using ResultItem = std::result_of_t<Functor(l2o::internal_::to_const_ref_t<T>)>;
-			return emumerator_converter<ResultItem>([selector = std::forward<Functor>(selector)](enumerator<T>& source)
+			return emumerator_converter<ResultItem, SourceItem>([selector = std::forward<Functor>(selector)]mutable(enumerator<SourceItem>& source)
 			{
-				/*while (source.isCanGetNext())
-				{
-					auto&& sourceItem = source->get();
-					yield(selector(sourceItem));
-				}*/
 				struct enumerator_impl: enumerator_base<ResultItem>
 				{
+					/*while (source.isCanGetNext())
+					{
+						auto&& sourceItem = source->get();
+						yield(selector(sourceItem));
+					}*/
 					template<class Selector>
-					enumerator_impl(enumerator<T>& source, Selector&& selector)
-						: _impl(source)
+					enumerator_impl(enumerator<SourceItem>& source, Selector&& selector)
+						: _source(source)
 						, _selector(std::forward<Selector>(selector))
 					{}
 
-					enumerator<T> _impl;
-					std::decay<std::remove_reference<Selector>>> _condition;
+					enumerator<SourceItem> _source;
+					std::decay<std::remove_reference<Selector>>> _selector;
 
 					ResultItem& get()
 					{
-						return selector(_impl->get());
+						return _selector(_impl->get());
 					}
 
 					bool isCanGetNext()
 					{
-						return source.isCanGetNext();
+						return _source.isCanGetNext();
 					}
 				};
-				return enumerator<ResultItem>(std::make_shared<enumerator_impl>(/*source, std::forward<Predicate>(condition)*/));
+				return enumerator<ResultItem>(std::make_shared<enumerator_impl>(source, std::forward<Functor>(selector)));
 			});
 		}
 
 		template<class Predicate>
 		enumerable where(Predicate&& condition)
 		{
-			using ResultItem = T;
-			return emumerator_converter<ResultItem>([condition=std::forward<Predicate>(condition)](enumerator<T>& source)
+			using SourceItem = T;
+			using ResultItem = SourceItem;
+			return emumerator_converter<ResultItem, SourceItem>([condition=std::forward<Predicate>(condition)]mutable(enumerator<SourceItem>& source)
 			{
 				/*while (source.isCanGetNext())
 				{
@@ -314,22 +370,22 @@ namespace l2o
 				struct enumerator_impl : enumerator_base<ResultItem>
 				{
 					template<class Predicate>
-					enumerator_impl(enumerator<T>& source, Predicate&& condition)
-						: _impl(source)
+					enumerator_impl(enumerator<SourceItem>& source, Predicate&& condition)
+						: _source(source)
 						, _condition (std::forward<Predicate>(condition))
 					{}
 
-					enumerator<T> _impl;
+					enumerator<SourceItem> _source;
 					std::decay<std::remove_reference<Predicate>>> _condition ;
 
 					ResultItem& get()
 					{
-						return _impl->get();
+						return _source->get();
 					}
 
 					bool isCanGetNext()
 					{
-						while (source.isCanGetNext())
+						while (_source.isCanGetNext())
 						{
 							if (condition(sourceItem))
 								return true;
@@ -347,15 +403,15 @@ namespace l2o
 	template<class T>
 	auto from() -> enumerable<T>
 	{
-		using Item = T;
-		return enumerable<Item>(std::make_shared<empty_enumerable<Item>>());
+		using ResultItem = T;
+		return enumerable<ResultItem>(std::make_shared<std::vector>());
 	}
 
 	template<class T>
 	auto from(const enumerable<T>& enumerableCollection) -> enumerable<T>
 	{
-		using Item = T;
-		return enumerable<Item>(enumerableCollection);
+		using ResultItem = T;
+		return enumerable<ResultItem>(enumerableCollection);
 	}
 
 	template<class T>
