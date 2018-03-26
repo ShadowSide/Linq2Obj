@@ -231,16 +231,16 @@ namespace l2o
 		template<class Selector>
 		enumerable order_by(Selector&& selector)
 		{
-			return order_by_comparator(ascending_comparator(std::forward<Selector>(selector))));
+			return order_by_comparator(ascending_comparator(std::forward<Selector>(selector)));
 		}
 
 		template<class Selector>
 		enumerable order_by_descending(Selector&& selector)
 		{
-			return order_by_comparator(descending_comparator(std::forward<Selector>(selector))));
+			return order_by_comparator(descending_comparator(std::forward<Selector>(selector)));
 		}
 
-		template<class Selector>
+		template<class Selector, class Comparator>
 		enumerable order_by_comparator(Comparator&& comparator)
 		{
 			using ResultItem = T;
